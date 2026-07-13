@@ -33,6 +33,7 @@ exports.up = async function up(knex) {
     table.boolean("popular").notNullable().defaultTo(false);
     table.text("image").notNullable();
     table.text("description").notNullable();
+    table.text("booking_url");
     table.timestamps(true, true);
 
     table

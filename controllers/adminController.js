@@ -96,6 +96,7 @@ async function createProperty(req, res) {
       images,
       description,
       highlights,
+      bookingUrl,
     } = req.body ?? {};
     const data = await store.createProperty({
       id,
@@ -112,6 +113,7 @@ async function createProperty(req, res) {
       images,
       description,
       highlights,
+      bookingUrl,
     });
     return res.status(201).json({ data });
   } catch (err) {
@@ -135,6 +137,7 @@ async function updateProperty(req, res) {
       images,
       description,
       highlights,
+      bookingUrl,
     } = req.body ?? {};
     const data = await store.updateProperty(req.params.id, {
       name,
@@ -150,6 +153,7 @@ async function updateProperty(req, res) {
       images,
       description,
       highlights,
+      bookingUrl,
     });
     return res.json({ data });
   } catch (err) {

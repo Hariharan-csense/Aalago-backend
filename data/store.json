@@ -254,5 +254,8 @@
   "admin": {
     "email": "admin@aalago.in",
     "passwordHash": "$2b$10$TLq48dTa0XrH4ynrQe39Nu75hwFzOi1tUB1gnF7MoVehaa1dufF4G"
+  },
+  "meta": {
+    "mysqlSeedMigrated": true
   }
 }

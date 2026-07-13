@@ -136,6 +136,30 @@ function numberValue(value, fallback = 0) {
   return Number.isFinite(next) ? next : fallback;
 }
 
+function normalizeBookingUrl(value, fallback = "") {
+  const raw = optionalString(value, fallback);
+  if (!raw) return "";
+  try {
+    const url = new URL(raw);
+    const host = url.hostname.toLowerCase();
+    if (!["aalastays.com", "www.aalastays.com", "book.aalabnb.com"].includes(host)) {
+      throw Object.assign(new Error("Booking link must be an AalaStays booking URL"), { status: 400 });
+    }
+    return url.toString();
+  } catch (err) {
+    if (err.status) throw err;
+    throw Object.assign(new Error("Booking link must be a valid URL"), { status: 400 });
+  }
+}
+
+function safeBookingUrl(value) {
+  try {
+    return normalizeBookingUrl(value, "");
+  } catch {
+    return "";
+  }
+}
+
 function toProperty(row, amenities = [], images = [], highlights = []) {
   return {
     id: row.id,
@@ -152,7 +176,17 @@ function toProperty(row, amenities = [], images = [], highlights = []) {
     images: images.length ? images : [row.image],
     description: row.description,
     highlights,
+    bookingUrl: safeBookingUrl(row.booking_url),
   };
+}
+
+async function ensureSchema() {
+  const hasBookingUrl = await db.schema.hasColumn("properties", "booking_url");
+  if (!hasBookingUrl) {
+    await db.schema.alterTable("properties", (table) => {
+      table.text("booking_url");
+    });
+  }
 }
 
 async function getPropertyRelations(propertyIds) {
@@ -230,54 +264,13 @@ function normalizePropertyPayload(payload, existing = null) {
       ? optionalString(payload.description, existing.description)
       : requiredString(payload.description, "Property description"),
     highlights: payload.highlights === undefined ? existing?.highlights ?? [] : stringList(payload.highlights),
+    bookingUrl: normalizeBookingUrl(payload.bookingUrl, existing?.bookingUrl ?? ""),
   };
-}
-
-async function migrateJsonDestinationsAndProperties() {
-  const store = readStore();
-  await db.transaction(async (trx) => {
-    for (const destination of store.destinations ?? []) {
-      const exists = await trx("destinations").where({ id: destination.id }).first();
-      if (!exists) {
-        await trx("destinations").insert({
-          id: destination.id,
-          name: destination.name,
-          state: destination.state,
-          image: destination.image,
-          description: destination.description,
-        });
-      }
-    }
-
-    for (const item of store.properties ?? []) {
-      const exists = await trx("properties").where({ id: item.id }).first();
-      if (!exists) {
-        const property = normalizePropertyPayload(item);
-        const destination = await trx("destinations").where({ id: property.destinationId }).first();
-        if (!destination) continue;
-        await trx("properties").insert({
-          id: property.id,
-          destination_id: property.destinationId,
-          name: property.name,
-          location: property.location,
-          type: property.type,
-          price: property.price,
-          rating: property.rating,
-          reviews: property.reviews,
-          popular: property.popular,
-          image: property.image,
-          description: property.description,
-        });
-        await replacePropertyList("property_images", property.id, "image", property.images, trx);
-        await replacePropertyList("property_amenities", property.id, "name", property.amenities, trx);
-        await replacePropertyList("property_highlights", property.id, "text", property.highlights, trx);
-      }
-    }
-  });
 }
 
 async function initStore() {
   const store = readStore();
+  await ensureSchema();
   if (!store.admin.passwordHash) {
     const password = process.env.ADMIN_PASSWORD || "admin123";
     store.admin.passwordHash = await bcrypt.hash(password, 10);
@@ -285,7 +278,6 @@ async function initStore() {
     writeStore(store);
     console.log(`Admin ready: ${store.admin.email} / ${password}`);
   }
-  await migrateJsonDestinationsAndProperties();
 }
 
 async function getDestinations() {
@@ -366,10 +358,21 @@ async function updateDestination(id, payload) {
 }
 
 async function deleteDestination(id) {
-  const deleted = await db("destinations").where({ id }).del();
-  if (!deleted) {
-    throw Object.assign(new Error("Destination not found"), { status: 404 });
-  }
+  await db.transaction(async (trx) => {
+    const existing = await trx("destinations").where({ id }).first();
+    if (!existing) {
+      throw Object.assign(new Error("Destination not found"), { status: 404 });
+    }
+    const propertyRows = await trx("properties").where({ destination_id: id }).select("id");
+    const propertyIds = propertyRows.map((property) => property.id);
+    if (propertyIds.length) {
+      await trx("property_images").whereIn("property_id", propertyIds).del();
+      await trx("property_amenities").whereIn("property_id", propertyIds).del();
+      await trx("property_highlights").whereIn("property_id", propertyIds).del();
+      await trx("properties").whereIn("id", propertyIds).del();
+    }
+    await trx("destinations").where({ id }).del();
+  });
 }
 
 async function getProperties(destinationId) {
@@ -425,6 +428,7 @@ async function createProperty(payload) {
       popular: property.popular,
       image: property.image,
       description: property.description,
+      booking_url: property.bookingUrl,
     });
     await replacePropertyList("property_images", property.id, "image", property.images, trx);
     await replacePropertyList("property_amenities", property.id, "name", property.amenities, trx);
@@ -455,6 +459,7 @@ async function updateProperty(id, payload) {
       popular: property.popular,
       image: property.image,
       description: property.description,
+      booking_url: property.bookingUrl,
       updated_at: new Date(),
     });
     await replacePropertyList("property_images", id, "image", property.images, trx);
@@ -465,10 +470,16 @@ async function updateProperty(id, payload) {
 }
 
 async function deleteProperty(id) {
-  const deleted = await db("properties").where({ id }).del();
-  if (!deleted) {
-    throw Object.assign(new Error("Property not found"), { status: 404 });
-  }
+  await db.transaction(async (trx) => {
+    const existing = await trx("properties").where({ id }).first();
+    if (!existing) {
+      throw Object.assign(new Error("Property not found"), { status: 404 });
+    }
+    await trx("property_images").where({ property_id: id }).del();
+    await trx("property_amenities").where({ property_id: id }).del();
+    await trx("property_highlights").where({ property_id: id }).del();
+    await trx("properties").where({ id }).del();
+  });
 }
 
 function getBlogPosts() {

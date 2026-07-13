@@ -15,6 +15,11 @@ app.use(helmet({ crossOriginResourcePolicy: { policy: "cross-origin" } }));
 app.use(cors());
 app.use(morgan("dev"));
 app.use(express.json({ limit: "2mb" }));
+app.use("/api", (_req, res, next) => {
+  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+  res.setHeader("Pragma", "no-cache");
+  next();
+});
 app.use(
   "/uploads",
   (_req, res, next) => {

@@ -1,5 +1,6 @@
 const express = require("express");
 const admin = require("../controllers/adminController");
+const subscriber = require("../controllers/subscriberController");
 const { requireAuth } = require("../middleware/auth");
 const { uploadImage } = require("../middleware/upload");
 
@@ -28,5 +29,8 @@ router.delete("/blog-posts/:id", admin.deleteBlogPost);
 
 router.get("/page-content/:slug", admin.getPageContent);
 router.put("/page-content/:slug", admin.updatePageContent);
+
+router.get("/partner-enquiries", admin.listPartnerEnquiries);
+router.get("/subscribers", subscriber.listSubscribers);
 
 module.exports = router;

@@ -121,6 +121,14 @@ function optionalString(value, fallback = "") {
   return typeof value === "string" ? value.trim() : fallback;
 }
 
+function emailString(value, name = "Email") {
+  const email = requiredString(value, name).toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    throw Object.assign(new Error(`${name} must be valid`), { status: 400 });
+  }
+  return email;
+}
+
 function stringList(value, fallback = []) {
   if (Array.isArray(value)) {
     return value
@@ -185,6 +193,45 @@ async function ensureSchema() {
   if (!hasBookingUrl) {
     await db.schema.alterTable("properties", (table) => {
       table.text("booking_url");
+    });
+  }
+  const hasPartnerEnquiries = await db.schema.hasTable("partner_enquiries");
+  if (!hasPartnerEnquiries) {
+    await db.schema.createTable("partner_enquiries", (table) => {
+      table.increments("id").primary();
+      table.string("name", 191).notNullable();
+      table.string("phone_number", 40).notNullable();
+      table.string("email", 191).notNullable();
+      table.string("city", 120).notNullable();
+      table.string("hotel_name", 191).notNullable();
+      table.string("location_within_city", 191).notNullable();
+      table.string("location_pin_code", 20).notNullable();
+      table.string("property_age", 40).notNullable();
+      table.string("number_of_rooms", 40).notNullable();
+      table.text("crm_payload");
+      table.timestamps(true, true);
+    });
+  }
+  const hasSubscribers = await db.schema.hasTable("subscribers");
+  if (!hasSubscribers) {
+    await db.schema.createTable("subscribers", (table) => {
+      table.increments("id").primary();
+      table.string("email", 191).notNullable().unique();
+      table.string("source", 120).notNullable().defaultTo("Newsletter Banner");
+      table.timestamps(true, true);
+    });
+  }
+  const hasMembershipPackages = await db.schema.hasTable("membership_packages");
+  if (!hasMembershipPackages) {
+    await db.schema.createTable("membership_packages", (table) => {
+      table.increments("id").primary();
+      table.string("name", 191).notNullable();
+      table.decimal("price", 10, 2).notNullable().defaultTo(0);
+      table.string("period", 80).notNullable().defaultTo("Year");
+      table.json("features").notNullable();
+      table.boolean("popular").notNullable().defaultTo(false);
+      table.integer("sort_order").unsigned().notNullable().defaultTo(0);
+      table.timestamps(true, true);
     });
   }
 }
@@ -271,13 +318,84 @@ function normalizePropertyPayload(payload, existing = null) {
 async function initStore() {
   const store = readStore();
   await ensureSchema();
-  if (!store.admin.passwordHash) {
-    const password = process.env.ADMIN_PASSWORD || "admin123";
-    store.admin.passwordHash = await bcrypt.hash(password, 10);
-    store.admin.email = process.env.ADMIN_EMAIL || store.admin.email;
-    writeStore(store);
-    console.log(`Admin ready: ${store.admin.email} / ${password}`);
+  await seedMembershipPackages();
+  const envEmail = process.env.ADMIN_EMAIL;
+  const envPassword = process.env.ADMIN_PASSWORD;
+  let changed = false;
+
+  if (envEmail && store.admin.email !== envEmail) {
+    store.admin.email = envEmail;
+    changed = true;
   }
+
+  if (envPassword) {
+    const passwordMatches = store.admin.passwordHash
+      ? await bcrypt.compare(envPassword, store.admin.passwordHash)
+      : false;
+    if (!passwordMatches) {
+      store.admin.passwordHash = await bcrypt.hash(envPassword, 10);
+      changed = true;
+    }
+  }
+
+  if (!store.admin.passwordHash) {
+    const password = envPassword || "admin123";
+    store.admin.passwordHash = await bcrypt.hash(password, 10);
+    store.admin.email = envEmail || store.admin.email;
+    changed = true;
+  }
+
+  if (changed) {
+    writeStore(store);
+  }
+
+  console.log(`Admin ready: ${store.admin.email}`);
+}
+
+async function seedMembershipPackages() {
+  const [{ count }] = await db("membership_packages").count({ count: "id" });
+  if (Number(count) > 0) return;
+  await db("membership_packages").insert([
+    {
+      name: "Explorer Membership",
+      price: 499,
+      period: "Year",
+      features: JSON.stringify([
+        "Member Newsletter",
+        "Early Access to Offers",
+        "Destination Updates",
+        "Member Community Access",
+      ]),
+      popular: false,
+      sort_order: 1,
+    },
+    {
+      name: "Traveller Membership",
+      price: 999,
+      period: "Year",
+      features: JSON.stringify([
+        "Everything in Explorer",
+        "Priority Property Recommendations",
+        "Special Partner Discounts",
+        "Festival Travel Alerts",
+      ]),
+      popular: true,
+      sort_order: 2,
+    },
+    {
+      name: "Pilgrim Membership",
+      price: 1499,
+      period: "Year",
+      features: JSON.stringify([
+        "Everything in Traveller",
+        "Premium Destination Guides",
+        "Exclusive Spiritual Event Access",
+        "Personalized Travel Assistance",
+      ]),
+      popular: false,
+      sort_order: 3,
+    },
+  ]);
 }
 
 async function getDestinations() {
@@ -576,6 +694,157 @@ function getAdmin() {
   return readStore().admin;
 }
 
+function toPartnerEnquiry(row) {
+  return {
+    id: row.id,
+    name: row.name,
+    phoneNumber: row.phone_number,
+    email: row.email,
+    city: row.city,
+    hotelName: row.hotel_name,
+    locationWithinCity: row.location_within_city,
+    locationPinCode: row.location_pin_code,
+    propertyAge: row.property_age,
+    numberOfRooms: row.number_of_rooms,
+    createdAt: row.created_at,
+  };
+}
+
+function toSubscriber(row) {
+  return {
+    id: row.id,
+    email: row.email,
+    source: row.source,
+    createdAt: row.created_at,
+  };
+}
+
+function parseJsonList(value) {
+  if (Array.isArray(value)) return stringList(value);
+  if (typeof value !== "string") return [];
+  try {
+    return stringList(JSON.parse(value));
+  } catch {
+    return value
+      .split("\n")
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+}
+
+function toMembershipPackage(row) {
+  return {
+    id: row.id,
+    name: row.name,
+    price: Number(row.price),
+    period: row.period,
+    features: parseJsonList(row.features),
+    popular: Boolean(row.popular),
+    sortOrder: Number(row.sort_order),
+  };
+}
+
+function normalizeMembershipPackage(payload, existing = null) {
+  return {
+    name: existing ? optionalString(payload.name, existing.name) : requiredString(payload.name, "Package name"),
+    price: payload.price === undefined ? existing?.price ?? 0 : numberValue(payload.price, 0),
+    period: existing ? optionalString(payload.period, existing.period) : requiredString(payload.period, "Package period"),
+    features: payload.features === undefined ? existing?.features ?? [] : stringList(payload.features),
+    popular: payload.popular === undefined ? Boolean(existing?.popular) : Boolean(payload.popular),
+    sortOrder: payload.sortOrder === undefined ? existing?.sortOrder ?? 0 : numberValue(payload.sortOrder, 0),
+  };
+}
+
+async function getMembershipPackages() {
+  const rows = await db("membership_packages").orderBy([
+    { column: "sort_order", order: "asc" },
+    { column: "id", order: "asc" },
+  ]);
+  return rows.map(toMembershipPackage);
+}
+
+async function createMembershipPackage(payload) {
+  const item = normalizeMembershipPackage(payload);
+  const [id] = await db("membership_packages").insert({
+    name: item.name,
+    price: item.price,
+    period: item.period,
+    features: JSON.stringify(item.features),
+    popular: item.popular,
+    sort_order: item.sortOrder,
+  });
+  const row = await db("membership_packages").where({ id }).first();
+  return toMembershipPackage(row);
+}
+
+async function updateMembershipPackage(id, payload) {
+  const row = await db("membership_packages").where({ id }).first();
+  if (!row) {
+    throw Object.assign(new Error("Membership package not found"), { status: 404 });
+  }
+  const existing = toMembershipPackage(row);
+  const item = normalizeMembershipPackage(payload, existing);
+  await db("membership_packages").where({ id }).update({
+    name: item.name,
+    price: item.price,
+    period: item.period,
+    features: JSON.stringify(item.features),
+    popular: item.popular,
+    sort_order: item.sortOrder,
+    updated_at: new Date(),
+  });
+  const updated = await db("membership_packages").where({ id }).first();
+  return toMembershipPackage(updated);
+}
+
+async function deleteMembershipPackage(id) {
+  const deleted = await db("membership_packages").where({ id }).del();
+  if (!deleted) {
+    throw Object.assign(new Error("Membership package not found"), { status: 404 });
+  }
+}
+
+async function createPartnerEnquiry(payload) {
+  const enquiry = {
+    name: requiredString(payload.name, "Name"),
+    phone_number: requiredString(payload.phoneNumber, "Phone number"),
+    email: requiredString(payload.email, "Email"),
+    city: requiredString(payload.city, "City"),
+    hotel_name: requiredString(payload.hotelName, "Hotel name"),
+    location_within_city: optionalString(payload.locationWithinCity, ""),
+    location_pin_code: requiredString(payload.locationPinCode, "Location pin code"),
+    property_age: requiredString(payload.propertyAge, "Age of the property"),
+    number_of_rooms: requiredString(payload.numberOfRooms, "Number of rooms"),
+    crm_payload: payload.crmPayload ? JSON.stringify(payload.crmPayload) : null,
+  };
+  const [id] = await db("partner_enquiries").insert(enquiry);
+  const row = await db("partner_enquiries").where({ id }).first();
+  return toPartnerEnquiry(row);
+}
+
+async function getPartnerEnquiries() {
+  const rows = await db("partner_enquiries").orderBy("created_at", "desc");
+  return rows.map(toPartnerEnquiry);
+}
+
+async function createSubscriber(payload) {
+  const subscriber = {
+    email: emailString(payload.email),
+    source: optionalString(payload.source, "Newsletter Banner") || "Newsletter Banner",
+  };
+  const existing = await db("subscribers").where({ email: subscriber.email }).first();
+  if (existing) return toSubscriber(existing);
+
+  const [id] = await db("subscribers").insert(subscriber);
+  const row = await db("subscribers").where({ id }).first();
+  return toSubscriber(row);
+}
+
+async function getSubscribers() {
+  const rows = await db("subscribers").orderBy("created_at", "desc");
+  return rows.map(toSubscriber);
+}
+
 module.exports = {
   initStore,
   getDestinations,
@@ -596,4 +865,12 @@ module.exports = {
   getPageContent,
   updatePageContent,
   getAdmin,
+  createPartnerEnquiry,
+  getPartnerEnquiries,
+  createSubscriber,
+  getSubscribers,
+  getMembershipPackages,
+  createMembershipPackage,
+  updateMembershipPackage,
+  deleteMembershipPackage,
 };

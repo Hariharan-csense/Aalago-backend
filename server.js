@@ -8,6 +8,9 @@ const { UPLOAD_DIR } = require("./middleware/upload");
 const { initStore } = require("./store/dataStore");
 const publicRoutes = require("./routes/public");
 const adminRoutes = require("./routes/admin");
+const membershipRoutes = require("./routes/membership");
+const adminMembershipRoutes = require("./routes/adminMembership");
+const subscriberRoutes = require("./routes/subscribers");
 
 const app = express();
 
@@ -35,6 +38,9 @@ app.get("/", (_req, res) => {
 });
 
 app.use("/api", publicRoutes);
+app.use("/api/memberships", membershipRoutes);
+app.use("/api/subscribers", subscriberRoutes);
+app.use("/api/admin/memberships", adminMembershipRoutes);
 app.use("/api/admin", adminRoutes);
 
 const PORT = process.env.PORT || 5000;

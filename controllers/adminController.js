@@ -241,6 +241,14 @@ function getPageContent(req, res) {
   return res.json({ data });
 }
 
+async function listPartnerEnquiries(_req, res) {
+  try {
+    return res.json({ data: await store.getPartnerEnquiries() });
+  } catch (err) {
+    return res.status(500).json({ message: err.message });
+  }
+}
+
 function updatePageContent(req, res) {
   try {
     const data = store.updatePageContent(req.params.slug, req.body ?? {});
@@ -267,4 +275,5 @@ module.exports = {
   deleteBlogPost,
   getPageContent,
   updatePageContent,
+  listPartnerEnquiries,
 };

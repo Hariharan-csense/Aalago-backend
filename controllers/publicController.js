@@ -36,10 +36,20 @@ function getPageContent(req, res) {
   return res.json({ data });
 }
 
+async function createPartnerEnquiry(req, res) {
+  try {
+    const data = await store.createPartnerEnquiry(req.body ?? {});
+    return res.status(201).json({ data });
+  } catch (err) {
+    return res.status(err.status || 500).json({ message: err.message });
+  }
+}
+
 module.exports = {
   listDestinations,
   listProperties,
   getProperty,
   listBlogPosts,
   getPageContent,
+  createPartnerEnquiry,
 };

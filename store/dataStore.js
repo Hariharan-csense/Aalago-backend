@@ -101,6 +101,104 @@ const defaultPageContent = {
   },
 };
 
+const membershipBenefitKeys = [
+  "bookingDiscount",
+  "rewardWallet",
+  "complimentaryBreakfast",
+  "earlyCheckInLateCheckOut",
+  "priorityBooking",
+  "memberOnlyDeals",
+  "travelWelcomeKit",
+  "priorityCustomerSupport",
+];
+
+const membershipBenefitColumns = {
+  bookingDiscount: "booking_discount",
+  rewardWallet: "reward_wallet",
+  complimentaryBreakfast: "complimentary_breakfast",
+  earlyCheckInLateCheckOut: "early_check_in_late_check_out",
+  priorityBooking: "priority_booking",
+  memberOnlyDeals: "member_only_deals",
+  travelWelcomeKit: "travel_welcome_kit",
+  priorityCustomerSupport: "priority_customer_support",
+};
+
+const defaultMembershipPackages = [
+  {
+    name: "AalaGO Explorer",
+    price: 499,
+    period: "Year",
+    popular: false,
+    sortOrder: 1,
+    benefits: {
+      bookingDiscount: "10% OFF (Up to Rs.500/year)",
+      rewardWallet: "Rs.250",
+      complimentaryBreakfast: "1 Stay",
+      earlyCheckInLateCheckOut: "",
+      priorityBooking: "No",
+      memberOnlyDeals: "Yes",
+      travelWelcomeKit: "No",
+      priorityCustomerSupport: "No",
+    },
+  },
+  {
+    name: "AalaGO Premium",
+    price: 999,
+    period: "Year",
+    popular: true,
+    sortOrder: 2,
+    benefits: {
+      bookingDiscount: "15% OFF (Up to Rs.2,000/year)",
+      rewardWallet: "Rs.600",
+      complimentaryBreakfast: "2 Stays",
+      earlyCheckInLateCheckOut: "1 Time",
+      priorityBooking: "Yes",
+      memberOnlyDeals: "Yes",
+      travelWelcomeKit: "Yes",
+      priorityCustomerSupport: "Yes",
+    },
+  },
+  {
+    name: "AalaGO Legend",
+    price: 1499,
+    period: "Year",
+    popular: false,
+    sortOrder: 3,
+    benefits: {
+      bookingDiscount: "20% OFF (Up to Rs.3,000/year)",
+      rewardWallet: "Rs.1,000",
+      complimentaryBreakfast: "3 Stays",
+      earlyCheckInLateCheckOut: "3 Times",
+      priorityBooking: "Yes",
+      memberOnlyDeals: "Yes",
+      travelWelcomeKit: "Premium Kit",
+      priorityCustomerSupport: "Premium Support",
+    },
+  },
+];
+
+function membershipFeaturesFromBenefits(benefits) {
+  return [
+    benefits.bookingDiscount,
+    benefits.rewardWallet ? `${benefits.rewardWallet} Reward Wallet` : "",
+    benefits.complimentaryBreakfast ? `${benefits.complimentaryBreakfast} Complimentary Breakfast` : "",
+    benefits.earlyCheckInLateCheckOut ? `${benefits.earlyCheckInLateCheckOut} Early Check-in / Late Check-out` : "",
+    truthyBenefit(benefits.priorityBooking) ? "Priority Booking" : "",
+    truthyBenefit(benefits.memberOnlyDeals) ? "Member-Only Deals" : "",
+    benefits.travelWelcomeKit && benefits.travelWelcomeKit !== "No" ? `Travel Welcome Kit: ${benefits.travelWelcomeKit}` : "",
+    benefits.priorityCustomerSupport && benefits.priorityCustomerSupport !== "No"
+      ? `Priority Customer Support: ${benefits.priorityCustomerSupport}`
+      : "",
+  ].filter(Boolean);
+}
+
+function membershipBenefitDbValues(benefits) {
+  return Object.entries(membershipBenefitColumns).reduce((row, [key, column]) => {
+    row[column] = benefits[key] ?? "";
+    return row;
+  }, {});
+}
+
 function readStore() {
   const raw = fs.readFileSync(DATA_PATH, "utf8");
   return JSON.parse(raw);
@@ -228,10 +326,44 @@ async function ensureSchema() {
       table.string("name", 191).notNullable();
       table.decimal("price", 10, 2).notNullable().defaultTo(0);
       table.string("period", 80).notNullable().defaultTo("Year");
-      table.json("features").notNullable();
+      table.text("booking_discount");
+      table.string("reward_wallet", 80).notNullable().defaultTo("");
+      table.string("complimentary_breakfast", 80).notNullable().defaultTo("");
+      table.string("early_check_in_late_check_out", 80).notNullable().defaultTo("");
+      table.string("priority_booking", 40).notNullable().defaultTo("No");
+      table.string("member_only_deals", 40).notNullable().defaultTo("Yes");
+      table.string("travel_welcome_kit", 120).notNullable().defaultTo("No");
+      table.string("priority_customer_support", 120).notNullable().defaultTo("No");
       table.boolean("popular").notNullable().defaultTo(false);
       table.integer("sort_order").unsigned().notNullable().defaultTo(0);
       table.timestamps(true, true);
+    });
+  }
+  const hasMembershipPackageFeatures = await db.schema.hasTable("membership_package_features");
+  if (!hasMembershipPackageFeatures) {
+    await db.schema.createTable("membership_package_features", (table) => {
+      table.increments("id").primary();
+      table.integer("membership_package_id").unsigned().notNullable();
+      table.text("text").notNullable();
+      table.integer("sort_order").unsigned().notNullable().defaultTo(0);
+      table
+        .foreign("membership_package_id")
+        .references("id")
+        .inTable("membership_packages")
+        .onDelete("CASCADE");
+    });
+  }
+  for (const [key, column] of Object.entries(membershipBenefitColumns)) {
+    const hasColumn = await db.schema.hasColumn("membership_packages", column);
+    if (hasColumn) continue;
+    await db.schema.alterTable("membership_packages", (table) => {
+      if (column === "booking_discount") {
+        table.text(column);
+      } else if (["priorityBooking", "memberOnlyDeals"].includes(key)) {
+        table.string(column, 40).notNullable().defaultTo(key === "memberOnlyDeals" ? "Yes" : "No");
+      } else {
+        table.string(column, 120).notNullable().defaultTo("");
+      }
     });
   }
 }
@@ -349,53 +481,50 @@ async function initStore() {
     writeStore(store);
   }
 
-  console.log(`Admin ready: ${store.admin.email}`);
+  // console.log(`Admin ready: ${store.admin.email}`);
 }
 
 async function seedMembershipPackages() {
   const [{ count }] = await db("membership_packages").count({ count: "id" });
-  if (Number(count) > 0) return;
-  await db("membership_packages").insert([
-    {
-      name: "Explorer Membership",
-      price: 499,
-      period: "Year",
-      features: JSON.stringify([
-        "Member Newsletter",
-        "Early Access to Offers",
-        "Destination Updates",
-        "Member Community Access",
-      ]),
-      popular: false,
-      sort_order: 1,
-    },
-    {
-      name: "Traveller Membership",
-      price: 999,
-      period: "Year",
-      features: JSON.stringify([
-        "Everything in Explorer",
-        "Priority Property Recommendations",
-        "Special Partner Discounts",
-        "Festival Travel Alerts",
-      ]),
-      popular: true,
-      sort_order: 2,
-    },
-    {
-      name: "Pilgrim Membership",
-      price: 1499,
-      period: "Year",
-      features: JSON.stringify([
-        "Everything in Traveller",
-        "Premium Destination Guides",
-        "Exclusive Spiritual Event Access",
-        "Personalized Travel Assistance",
-      ]),
-      popular: false,
-      sort_order: 3,
-    },
-  ]);
+  if (Number(count) === 0) {
+    await db.transaction(async (trx) => {
+      for (const plan of defaultMembershipPackages) {
+        const [id] = await trx("membership_packages").insert({
+          name: plan.name,
+          price: plan.price,
+          period: plan.period,
+          ...membershipBenefitDbValues(plan.benefits),
+          popular: plan.popular,
+          sort_order: plan.sortOrder,
+        });
+        await replaceMembershipFeatures(id, membershipFeaturesFromBenefits(plan.benefits), trx);
+      }
+    });
+    return;
+  }
+
+  const rows = await db("membership_packages")
+    .orderBy([{ column: "sort_order", order: "asc" }, { column: "id", order: "asc" }])
+    .limit(defaultMembershipPackages.length);
+
+  await Promise.all(rows.map((row, index) => {
+    const plan = defaultMembershipPackages[index];
+    if (!plan) return null;
+    const hasBenefitValues = Object.values(membershipBenefitColumns).some((column) => row[column]);
+    if (hasBenefitValues) return null;
+    return db.transaction(async (trx) => {
+      await trx("membership_packages").where({ id: row.id }).update({
+        name: plan.name,
+        price: plan.price,
+        period: plan.period,
+        ...membershipBenefitDbValues(plan.benefits),
+        popular: plan.popular,
+        sort_order: plan.sortOrder,
+        updated_at: new Date(),
+      });
+      await replaceMembershipFeatures(row.id, membershipFeaturesFromBenefits(plan.benefits), trx);
+    });
+  }));
 }
 
 async function getDestinations() {
@@ -732,24 +861,87 @@ function parseJsonList(value) {
   }
 }
 
-function toMembershipPackage(row) {
+function parseJsonObject(value) {
+  if (value && typeof value === "object" && !Array.isArray(value)) return value;
+  if (typeof value !== "string" || !value.trim()) return {};
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function normalizeMembershipBenefits(value, fallback = {}) {
+  const raw = parseJsonObject(value);
+  return membershipBenefitKeys.reduce((benefits, key) => {
+    benefits[key] = optionalString(raw[key], fallback[key] ?? "");
+    return benefits;
+  }, {});
+}
+
+function truthyBenefit(value) {
+  return typeof value === "string" && ["yes", "true", "included"].includes(value.trim().toLowerCase());
+}
+
+function membershipBenefitsFromRow(row) {
+  return membershipBenefitKeys.reduce((benefits, key) => {
+    const column = membershipBenefitColumns[key];
+    benefits[key] = optionalString(row[column], "");
+    return benefits;
+  }, {});
+}
+
+function toMembershipPackage(row, features = []) {
+  const benefits = membershipBenefitsFromRow(row);
   return {
     id: row.id,
     name: row.name,
     price: Number(row.price),
     period: row.period,
-    features: parseJsonList(row.features),
+    features,
+    benefits,
     popular: Boolean(row.popular),
     sortOrder: Number(row.sort_order),
   };
 }
 
+async function getMembershipFeatureMap(packageIds) {
+  if (!packageIds.length) return new Map();
+  const rows = await db("membership_package_features")
+    .whereIn("membership_package_id", packageIds)
+    .orderBy(["membership_package_id", "sort_order", "id"]);
+  return rows.reduce((values, row) => {
+    const current = values.get(row.membership_package_id) ?? [];
+    current.push(row.text);
+    values.set(row.membership_package_id, current);
+    return values;
+  }, new Map());
+}
+
+async function replaceMembershipFeatures(packageId, features, trx = db) {
+  await trx("membership_package_features").where({ membership_package_id: packageId }).del();
+  if (!features.length) return;
+  await trx("membership_package_features").insert(features.map((text, index) => ({
+    membership_package_id: packageId,
+    text,
+    sort_order: index,
+  })));
+}
+
 function normalizeMembershipPackage(payload, existing = null) {
+  const benefits = payload.benefits === undefined
+    ? existing?.benefits ?? normalizeMembershipBenefits({})
+    : normalizeMembershipBenefits(payload.benefits, existing?.benefits ?? {});
+  const features = payload.features === undefined
+    ? existing?.features ?? membershipFeaturesFromBenefits(benefits)
+    : stringList(payload.features);
   return {
     name: existing ? optionalString(payload.name, existing.name) : requiredString(payload.name, "Package name"),
     price: payload.price === undefined ? existing?.price ?? 0 : numberValue(payload.price, 0),
     period: existing ? optionalString(payload.period, existing.period) : requiredString(payload.period, "Package period"),
-    features: payload.features === undefined ? existing?.features ?? [] : stringList(payload.features),
+    features: features.length ? features : membershipFeaturesFromBenefits(benefits),
+    benefits,
     popular: payload.popular === undefined ? Boolean(existing?.popular) : Boolean(payload.popular),
     sortOrder: payload.sortOrder === undefined ? existing?.sortOrder ?? 0 : numberValue(payload.sortOrder, 0),
   };
@@ -760,21 +952,26 @@ async function getMembershipPackages() {
     { column: "sort_order", order: "asc" },
     { column: "id", order: "asc" },
   ]);
-  return rows.map(toMembershipPackage);
+  const features = await getMembershipFeatureMap(rows.map((row) => row.id));
+  return rows.map((row) => toMembershipPackage(row, features.get(row.id) ?? []));
 }
 
 async function createMembershipPackage(payload) {
   const item = normalizeMembershipPackage(payload);
-  const [id] = await db("membership_packages").insert({
-    name: item.name,
-    price: item.price,
-    period: item.period,
-    features: JSON.stringify(item.features),
-    popular: item.popular,
-    sort_order: item.sortOrder,
+  let id;
+  await db.transaction(async (trx) => {
+    [id] = await trx("membership_packages").insert({
+      name: item.name,
+      price: item.price,
+      period: item.period,
+      ...membershipBenefitDbValues(item.benefits),
+      popular: item.popular,
+      sort_order: item.sortOrder,
+    });
+    await replaceMembershipFeatures(id, item.features, trx);
   });
   const row = await db("membership_packages").where({ id }).first();
-  return toMembershipPackage(row);
+  return toMembershipPackage(row, item.features);
 }
 
 async function updateMembershipPackage(id, payload) {
@@ -782,26 +979,33 @@ async function updateMembershipPackage(id, payload) {
   if (!row) {
     throw Object.assign(new Error("Membership package not found"), { status: 404 });
   }
-  const existing = toMembershipPackage(row);
+  const featureMap = await getMembershipFeatureMap([Number(id)]);
+  const existing = toMembershipPackage(row, featureMap.get(Number(id)) ?? []);
   const item = normalizeMembershipPackage(payload, existing);
-  await db("membership_packages").where({ id }).update({
-    name: item.name,
-    price: item.price,
-    period: item.period,
-    features: JSON.stringify(item.features),
-    popular: item.popular,
-    sort_order: item.sortOrder,
-    updated_at: new Date(),
+  await db.transaction(async (trx) => {
+    await trx("membership_packages").where({ id }).update({
+      name: item.name,
+      price: item.price,
+      period: item.period,
+      ...membershipBenefitDbValues(item.benefits),
+      popular: item.popular,
+      sort_order: item.sortOrder,
+      updated_at: new Date(),
+    });
+    await replaceMembershipFeatures(id, item.features, trx);
   });
   const updated = await db("membership_packages").where({ id }).first();
-  return toMembershipPackage(updated);
+  return toMembershipPackage(updated, item.features);
 }
 
 async function deleteMembershipPackage(id) {
-  const deleted = await db("membership_packages").where({ id }).del();
-  if (!deleted) {
-    throw Object.assign(new Error("Membership package not found"), { status: 404 });
-  }
+  await db.transaction(async (trx) => {
+    await trx("membership_package_features").where({ membership_package_id: id }).del();
+    const deleted = await trx("membership_packages").where({ id }).del();
+    if (!deleted) {
+      throw Object.assign(new Error("Membership package not found"), { status: 404 });
+    }
+  });
 }
 
 async function createPartnerEnquiry(payload) {

@@ -8,7 +8,7 @@
       "description": "Walk the sacred corridors of Rameswaram and stay close to the Ramanathaswamy Temple."
     },
     {
-      "id": "madurai",
+      "id": "madurai",  
       "name": "Madurai",
       "state": "Tamil Nadu",
       "image": "http://localhost:5000/uploads/1783408451470-images-5.jpg",
@@ -159,9 +159,9 @@
   ],
   "pageContent": {
     "home": {
-      "heroTitle": "Discover",
-      "heroHighlight": "Peaceful Stays",
-      "heroSubtitle": "Find reliable temple-town hospitality for pilgrims, families, and spiritual travellers across India.",
+      "heroTitle": "Your Trusted Stay",
+      "heroHighlight": " Travel Partner",
+      "heroSubtitle": "Book Hotels • Homestays • Temple Stays • Holiday Homes Across India.",
       "heroImage": "http://localhost:5000/uploads/1783414619830-photo-1520250497591-112f2f40a3f4.avif",
       "aboutTitle": "Temple-Town Hospitality You Can Trust",
       "aboutText": [

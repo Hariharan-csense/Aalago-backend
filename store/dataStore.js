@@ -227,6 +227,14 @@ function emailString(value, name = "Email") {
   return email;
 }
 
+function phoneString(value, name = "Phone number") {
+  const phone = requiredString(value, name);
+  if (!/^[6-9]\d{9}$/.test(phone)) {
+    throw Object.assign(new Error(`${name} must be 10 digits and start with 6, 7, 8, or 9`), { status: 400 });
+  }
+  return phone;
+}
+
 function stringList(value, fallback = []) {
   if (Array.isArray(value)) {
     return value
@@ -1011,8 +1019,8 @@ async function deleteMembershipPackage(id) {
 async function createPartnerEnquiry(payload) {
   const enquiry = {
     name: requiredString(payload.name, "Name"),
-    phone_number: requiredString(payload.phoneNumber, "Phone number"),
-    email: requiredString(payload.email, "Email"),
+    phone_number: phoneString(payload.phoneNumber),
+    email: emailString(payload.email),
     city: requiredString(payload.city, "City"),
     hotel_name: requiredString(payload.hotelName, "Hotel name"),
     location_within_city: optionalString(payload.locationWithinCity, ""),

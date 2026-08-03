@@ -7,10 +7,11 @@ const DATA_PATH = path.join(__dirname, "../data/store.json");
 
 const defaultPageContent = {
   home: {
-    heroTitle: "Discover",
-    heroHighlight: "Peaceful Stays",
+    heroKicker: "AalaGO Book Direct. Save More. Travel Better",
+    heroTitle: "Find Your Perfect Stay,",
+    heroHighlight: "Anywhere in India",
     heroSubtitle:
-      "Find reliable temple-town hospitality for pilgrims, families, and spiritual travellers across India.",
+      "Book Hotels • Homestays • Temple Stays • Holiday Homes Across India",
     heroImage:
       "https://images.unsplash.com/photo-1582510003544-4d00b7f74220?auto=format&fit=crop&w=1600&q=80",
     aboutTitle: "Temple-Town Hospitality You Can Trust",
@@ -25,22 +26,73 @@ const defaultPageContent = {
       "Get temple-town openings, stay standards, and route ideas in your inbox.",
     whyChooseUs: [
       {
-        title: "Curated Properties",
-        copy: "Handpicked stays near sacred destinations with verified quality standards.",
+        title: "Best Price Guarantee",
+        copy: "Enjoy competitive prices with exclusive member discounts.",
       },
       {
-        title: "Spiritual Destinations",
-        copy: "Explore India's most revered temple towns with local guidance.",
+        title: "Verified Properties",
+        copy: "Every property is carefully verified for quality and comfort.",
       },
       {
-        title: "Easy Discovery",
-        copy: "Search by temple, route, family needs, and arrival timing.",
+        title: "Instant Confirmation",
+        copy: "Receive instant booking confirmation.",
       },
       {
-        title: "Trusted Hospitality",
-        copy: "Reliable stays built for pilgrims, families, and spiritual travellers.",
+        title: "Secure Payments",
+        copy: "100% secure online payment gateway.",
+      },
+      {
+        title: "24x7 Customer Support",
+        copy: "Our team is always ready to help.",
+      },
+      {
+        title: "Trusted by Thousands of Travelers",
+        copy: "Hotels, Homestays, Resorts, Villas & Temple Stays.",
       },
     ],
+    stayTypes: [
+      "Hotels",
+      "Homestays",
+      "Resorts",
+      "Farm Stays",
+      "Serviced Apartments",
+      "Dormitories",
+      "Temple Stays",
+      "Holiday Villas",
+    ],
+    popularDestinations: [
+      "Tiruchendur",
+      "Madurai",
+      "Kanyakumari",
+      "Courtallam",
+      "Rameswaram",
+      "Velankanni",
+      "Tirunelveli",
+      "Chennai",
+      "Ooty",
+      "Kodaikanal",
+      "Yercaud",
+      "Coimbatore",
+      "Bengaluru",
+      "Mysuru",
+      "Hyderabad",
+    ],
+    templeTourism: {
+      title: "Temple Tourism",
+      subtitle: "Stay Near India's Most Sacred Temples",
+      copy: "Book accommodation close to famous pilgrimage destinations.",
+      temples: [
+        "Tiruchendur Murugan Temple",
+        "Madurai Meenakshi Temple",
+        "Rameswaram Ramanathaswamy Temple",
+        "Kanyakumari Bhagavathy Temple",
+        "Palani Murugan Temple",
+        "Velankanni Basilica",
+        "Sabarimala",
+        "Tirupati",
+      ],
+      tagline: "Comfortable • Affordable • Family Friendly",
+    },
     testimonials: [
       {
         name: "Priya Sharma",
@@ -294,7 +346,81 @@ function toProperty(row, amenities = [], images = [], highlights = []) {
   };
 }
 
+async function ensureCoreSchema() {
+  const hasDestinations = await db.schema.hasTable("destinations");
+  if (!hasDestinations) {
+    await db.schema.createTable("destinations", (table) => {
+      table.string("id", 120).primary();
+      table.string("name", 191).notNullable();
+      table.string("state", 191).notNullable();
+      table.text("image").notNullable();
+      table.text("description").notNullable();
+      table.timestamps(true, true);
+    });
+  }
+
+  const hasProperties = await db.schema.hasTable("properties");
+  if (!hasProperties) {
+    await db.schema.createTable("properties", (table) => {
+      table.string("id", 120).primary();
+      table.string("destination_id", 120).notNullable();
+      table.string("name", 191).notNullable();
+      table.string("location", 191).notNullable();
+      table.string("type", 80).notNullable();
+      table.decimal("price", 10, 2).notNullable().defaultTo(0);
+      table.decimal("rating", 3, 2).notNullable().defaultTo(0);
+      table.integer("reviews").unsigned().notNullable().defaultTo(0);
+      table.boolean("popular").notNullable().defaultTo(false);
+      table.text("image").notNullable();
+      table.text("description").notNullable();
+      table.text("booking_url");
+      table.timestamps(true, true);
+      table
+        .foreign("destination_id")
+        .references("destinations.id")
+        .onUpdate("CASCADE")
+        .onDelete("CASCADE");
+    });
+  }
+
+  const relationTables = [
+    {
+      name: "property_images",
+      column: "image",
+      build: (table) => table.text("image").notNullable(),
+    },
+    {
+      name: "property_amenities",
+      column: "name",
+      build: (table) => table.string("name", 120).notNullable(),
+    },
+    {
+      name: "property_highlights",
+      column: "text",
+      build: (table) => table.string("text", 255).notNullable(),
+    },
+  ];
+
+  for (const relation of relationTables) {
+    const exists = await db.schema.hasTable(relation.name);
+    if (exists) continue;
+    await db.schema.createTable(relation.name, (table) => {
+      table.increments("id").primary();
+      table.string("property_id", 120).notNullable();
+      relation.build(table);
+      table.integer("sort_order").unsigned().notNullable().defaultTo(0);
+      table.timestamps(true, true);
+      table
+        .foreign("property_id")
+        .references("properties.id")
+        .onUpdate("CASCADE")
+        .onDelete("CASCADE");
+    });
+  }
+}
+
 async function ensureSchema() {
+  await ensureCoreSchema();
   const hasBookingUrl = await db.schema.hasColumn("properties", "booking_url");
   if (!hasBookingUrl) {
     await db.schema.alterTable("properties", (table) => {
@@ -415,6 +541,53 @@ async function replacePropertyList(tableName, propertyId, columnName, values, tr
   }
 }
 
+async function seedDestinationsAndPropertiesFromStore(store) {
+  const destinations = Array.isArray(store.destinations) ? store.destinations : [];
+  const properties = Array.isArray(store.properties) ? store.properties : [];
+
+  if (destinations.length) {
+    const [{ count }] = await db("destinations").count({ count: "id" });
+    if (Number(count) === 0) {
+      await db("destinations").insert(destinations.map((destination) => ({
+        id: requiredString(destination.id, "Destination id"),
+        name: requiredString(destination.name, "Destination name"),
+        state: requiredString(destination.state, "Destination state"),
+        image: requiredString(destination.image, "Destination image"),
+        description: requiredString(destination.description, "Destination description"),
+      })));
+    }
+  }
+
+  if (!properties.length) return;
+  const [{ count }] = await db("properties").count({ count: "id" });
+  if (Number(count) > 0) return;
+
+  await db.transaction(async (trx) => {
+    for (const item of properties) {
+      const property = normalizePropertyPayload(item);
+      const destination = await trx("destinations").where({ id: property.destinationId }).first();
+      if (!destination) continue;
+      await trx("properties").insert({
+        id: property.id,
+        destination_id: property.destinationId,
+        name: property.name,
+        location: property.location,
+        type: property.type,
+        price: property.price,
+        rating: property.rating,
+        reviews: property.reviews,
+        popular: property.popular,
+        image: property.image,
+        description: property.description,
+        booking_url: property.bookingUrl,
+      });
+      await replacePropertyList("property_images", property.id, "image", property.images, trx);
+      await replacePropertyList("property_amenities", property.id, "name", property.amenities, trx);
+      await replacePropertyList("property_highlights", property.id, "text", property.highlights, trx);
+    }
+  });
+}
+
 function normalizePropertyPayload(payload, existing = null) {
   const rawImages = Array.isArray(payload.images)
     ? payload.images
@@ -458,6 +631,7 @@ function normalizePropertyPayload(payload, existing = null) {
 async function initStore() {
   const store = readStore();
   await ensureSchema();
+  await seedDestinationsAndPropertiesFromStore(store);
   await seedMembershipPackages();
   const envEmail = process.env.ADMIN_EMAIL;
   const envPassword = process.env.ADMIN_PASSWORD;

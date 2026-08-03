@@ -1,8 +1,8 @@
 /**
  * Initial aalaGO schema.
  *
- * Current app still reads/writes backend/data/store.json, but these tables make
- * the backend ready to move the same admin-managed data into MySQL.
+ * Core aalaGO admin-managed data tables. Runtime destination/property reads
+ * and writes use Knex-backed MySQL tables.
  */
 exports.up = async function up(knex) {
   await knex.schema.createTable("admins", (table) => {
